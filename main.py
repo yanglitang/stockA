@@ -13,6 +13,7 @@ import requests
 import json
 
 (EventType, EVT_TRANS_DATA_EVENT) = wx.lib.newevent.NewEvent()
+GREEN_COLOR = (0x00,0xB0,0x50)
 
 global_header = {
     'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -137,6 +138,7 @@ class MainWindow(wx.Frame):
         self.showStart = -1
         self.showEnd = -1
         self.filterShoushu = 0
+        self.highLightShoushu = -1
         self.panQian = True
         self.panQianTime = time(9, 25, 0)
         
@@ -171,6 +173,11 @@ class MainWindow(wx.Frame):
         self.filterPanQianCtrl = wx.CheckBox(self.panel, label='过滤盘前竞价')
         self.filterPanQianCtrl.Bind(wx.EVT_CHECKBOX, self.onfilterPanQianCtrl)
 
+        self.highLightShoushuCtrl =wx.TextCtrl(self.panel)
+        self.highLightShoushuCtrl.SetSizeWH(20, -1)
+        highlight_button = wx.Button(self.panel, -1, '高亮')
+        self.Bind(wx.EVT_BUTTON, self.onHighLightShoushuClicked, highlight_button)
+
         self.grid = wx.grid.Grid(self.panel)
         self.createGrid()
         self.grid.Bind(wx.EVT_SCROLLWIN, self.onScrollWin)
@@ -190,6 +197,8 @@ class MainWindow(wx.Frame):
         grid_button_sizer.Add(self.filterShoushuCtrl)
         grid_button_sizer.Add(filter_button)
         grid_button_sizer.Add(self.filterPanQianCtrl)
+        grid_button_sizer.Add(self.highLightShoushuCtrl)
+        grid_button_sizer.Add(highlight_button)
 
         grid_sizer = wx.BoxSizer(wx.VERTICAL)
         grid_sizer.Add(grid_button_sizer, 0, wx.EXPAND, 5)
@@ -253,6 +262,12 @@ class MainWindow(wx.Frame):
             self.loadData()
             self.fillGrid(self.stockRecordList)
 
+    def onHighLightShoushuClicked(self, event):
+        highlight_text = self.highLightShoushuCtrl.GetValue().strip()
+        if len(highlight_text) > 0:
+            self.highLightShoushu = int(highlight_text)
+            self.fillGrid(self.stockRecordList) 
+
     def onScrollWin(self, event):
         event_type = event.GetEventType()
         self.scrollGrid(event_type)
@@ -307,7 +322,7 @@ class MainWindow(wx.Frame):
     def getTextColor(self, record):
         text_color = None
         if int(record['bsbz']) == 1:
-            text_color = wx.GREEN
+            text_color = GREEN_COLOR
         elif int(record['bsbz'] == 2):
             text_color = wx.RED
         elif int(record['bsbz'] == 4):
@@ -358,6 +373,16 @@ class MainWindow(wx.Frame):
                 self.grid.SetCellTextColour(row, col_index + 2, text_color)
                 self.grid.SetCellValue(row, col_index + 2, str(record['shoushu']))
 
+                if self.highLightShoushu > 0 and record['shoushu'] >= self.highLightShoushu:
+                    for i in range(0,3):
+                        if(text_color == wx.RED):
+                            self.grid.SetCellBackgroundColour(row, col_index + i, (0xEF, 0X94, 0X9F))
+                        if(text_color == GREEN_COLOR):
+                            self.grid.SetCellBackgroundColour(row, col_index + i, (0xAD, 0XD8, 0X8D))
+                if self.highLightShoushu <= 0:
+                    for i in range(0,3):
+                        self.grid.SetCellBackgroundColour(row, col_index + i, wx.WHITE)
+
                 record_index = record_index + 1
                 row_idx = row_idx + 1
                 if(row_idx >= len(row_range)):
@@ -376,9 +401,9 @@ class MainWindow(wx.Frame):
                         row_idx = 0
                         break
                     row = row_range[row_idx]
-                    self.grid.SetCellValue(row, col_index, '   ')
-                    self.grid.SetCellValue(row, col_index + 1, '   ')
-                    self.grid.SetCellValue(row, col_index + 2, '   ')
+                    for i in range(col_index, col_index + 3):
+                        self.grid.SetCellValue(row, i, '   ')
+                        self.grid.SetCellBackgroundColour(row, i, wx.WHITE)
                     row_idx = row_idx + 1
                 col_index = col_index + 3
 
