@@ -11,6 +11,7 @@ import datetime
 from datetime import timedelta, time, date
 import requests
 import json
+from StocksDB import StocksDB
 
 (EventType, EVT_TRANS_DATA_EVENT) = wx.lib.newevent.NewEvent()
 GREEN_COLOR = (0x00,0xB0,0x50)
