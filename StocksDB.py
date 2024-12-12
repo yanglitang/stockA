@@ -18,15 +18,51 @@ global_url='https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php
 
 global_stock_url='https://stockapi.com.cn/v1/base2/secondHistory?date={}&code={}'
 
+def print_function_name(func):
+    def wrapper(*args, **kwargs):
+        print('function name: ', func.__name__)
+        return func(*args, **kwargs)
+    return wrapper
+
 class StocksDB:
     def __init__(self):
         self.listFocusStocks = []
         self.listSelStockRecords = []
-        self.mutex = threading.Lock()
+        self.mutex = threading.RLock()
         self.filterShoushu = 0
         self.highLightShoushu = -1
         self.panQian = True
         self.panQianTime = time(9, 25, 0)
+        self.dbPath = None
+
+    def create(self, dbpath):
+        global dbSession
+        self.dbPath = dbpath
+        dbURI='sqlite:///'+dbpath+'?charset=utf8'
+        if not dbSession:
+            dbEngine=create_engine(dbURI, echo=True)
+            Session = sessionmaker(bind=dbEngine)
+            dbSession=Session()
+            Base.metadata.create_all(dbEngine)
+            dbSession.commit()
+
+    def getStockRTData(self):
+        self.mutex.acquire()
+        ret = copy.copy(self.listSelStockRecords)
+        self.mutex.release()
+        return ret
+
+    def getStockRTDataCnt(self):
+        self.mutex.acquire()
+        ret = len(self.listSelStockRecords)
+        self.mutex.release()
+        return ret
+
+    def setPanQian(self, panqian):
+        self.panQian = panqian
+
+    def getPanQian(self):
+        return self.panQian
 
     def __updateFocusStocksFromDB(self):
         global dbSession
@@ -35,13 +71,15 @@ class StocksDB:
         self.listFocusStocks = [stock.to_dict() for stock in stocks]
         self.mutex.release()
 
-    def loadFocusStocks(self, db_path):
+    def loadFocusStocks(self):
         global dbSession
-        global dbEngine        
+        global dbEngine
+        focus_list = []
         self.mutex.acquire()
-        if db_path:
+        print(self.dbPath)
+        if self.dbPath:
             try:
-                dbURI='sqlite:///'+db_path+'?charset=utf8'
+                dbURI='sqlite:///'+self.dbPath+'?charset=utf8'
                 if not dbSession:
                     dbEngine=create_engine(dbURI, echo=True)
                     Session = sessionmaker(bind=dbEngine)
@@ -53,6 +91,7 @@ class StocksDB:
                 print(f"Error opening database: {e}")
             focus_list = copy.copy(self.listFocusStocks)
         self.mutex.release()
+        print(focus_list)
         return focus_list
     
     def reloadStockRTData(self, stock):
@@ -72,7 +111,8 @@ class StocksDB:
 
     def addFocusStocks(self, stock_data):
         global dbSession
-        global dbEngine        
+        global dbEngine     
+        insert = True   
         self.mutex.acquire()
         stocks=dbSession.query(StockTable).filter(StockTable.code==stock_data['code']).all()
         if len(stocks) <= 0:
@@ -82,10 +122,12 @@ class StocksDB:
             dbSession.commit()
             row=dbSession.query(StockTable).filter(StockTable.code==stock_data['code']).one()
             self.__updateFocusStocksFromDB()
+            insert = True
         else:
             row=dbSession.query(StockTable).filter(StockTable.code==stock_data['code']).one()
+            insert = False
         self.mutex.release()
-        return row.id
+        return (row.id, insert)
     
     def delFocusStocks(self, id):
         global dbSession     
