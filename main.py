@@ -333,8 +333,19 @@ class MainWindow(wx.Frame):
     def getVisibleRowRange(self):
         row_range = []
         row_index = 0
+        col_index = -1
         while(row_index < self.grid.GetNumberRows()):
-            if self.grid.IsVisible(row_index, 0):
+            tmp_col_index = 0
+
+            #查找第一个可见列，col_index设置为第一个可见列的索引号，col_index已经被设置过，则不需要再查找
+            while(col_index == -1 and tmp_col_index < self.grid.GetNumberCols()):
+                if self.grid.IsVisible(row_index, tmp_col_index):
+                    #找到第一个可见单元格，那么这个单元格的列号就是第一个可见列
+                    col_index = tmp_col_index
+                    break
+                tmp_col_index = tmp_col_index + 1
+            if col_index != -1 and self.grid.IsVisible(row_index, col_index):
+                #可见行添加到可见行列表中
                 row_range.append(row_index)
             row_index = row_index + 1
         return row_range
