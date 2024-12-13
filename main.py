@@ -25,14 +25,6 @@ global_url='https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php
 
 global_stock_url='https://stockapi.com.cn/v1/base2/secondHistory?date={}&code={}'
 
-class TransDataEvent(wx.PyCommandEvent):
-    def __init__(self, data=None):
-        wx.PyCommandEvent.__init__(self, EventType)
-        self.data = data
- 
-    def GetData(self):
-        return self.data
-
 class SelStockWindow(wx.Frame):
     def __init__(self, parent, id, title):
         wx.Frame.__init__(self, parent, id, title)
@@ -45,12 +37,12 @@ class SelStockWindow(wx.Frame):
         self.stockCodeCtrl.SetSizeWH(20, -1)
         search_button = wx.Button(panel, -1, '搜索股票')
         self.Bind(wx.EVT_BUTTON, self.onSearchButton, search_button)
-        self.stockList=wx.ListCtrl(panel, style=wx.LC_REPORT)
-        self.stockList.InsertColumn(0, '股票代码')
-        self.stockList.InsertColumn(1, '股票名称')
-        self.stockList.SetColumnWidth(0, 150)
-        self.stockList.SetColumnWidth(1, 150)
-        self.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.onStockListDoubleClicked, self.stockList)
+        self.stockListCtrl=wx.ListCtrl(panel, style=wx.LC_REPORT)
+        self.stockListCtrl.InsertColumn(0, '股票代码')
+        self.stockListCtrl.InsertColumn(1, '股票名称')
+        self.stockListCtrl.SetColumnWidth(0, 150)
+        self.stockListCtrl.SetColumnWidth(1, 150)
+        self.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.onStockListDoubleClicked, self.stockListCtrl)
 
         global dbSession
         # atable=Table(AStockTable.__tablename__, Base.metadata)
@@ -89,7 +81,7 @@ class SelStockWindow(wx.Frame):
         buttonSizer.Add(search_button, flag=wx.ALIGN_BOTTOM, border=10)
         panelSizer = wx.BoxSizer(wx.VERTICAL)
         panelSizer.Add(buttonSizer)
-        panelSizer.Add(self.stockList, 1, wx.EXPAND)
+        panelSizer.Add(self.stockListCtrl, 1, wx.EXPAND)
         panel.SetSizer(panelSizer)
         self.Centre()
         self.Show()
@@ -98,8 +90,8 @@ class SelStockWindow(wx.Frame):
         self.Destroy()
 
     def showStock(self, stock_data):
-        index=self.stockList.InsertItem(0, stock_data['code'])
-        self.stockList.SetItem(index, 1, stock_data['name'])
+        index=self.stockListCtrl.InsertItem(0, stock_data['code'])
+        self.stockListCtrl.SetItem(index, 1, stock_data['name'])
 
     def addStock(self, stock_data):
         global dbSession
@@ -114,8 +106,8 @@ class SelStockWindow(wx.Frame):
 
     def onStockListDoubleClicked(self, event):
         index = event.GetIndex()
-        self.selStock['code']=self.stockList.GetItemText(index, 0)
-        self.selStock['name']=self.stockList.GetItemText(index, 1)
+        self.selStock['code']=self.stockListCtrl.GetItemText(index, 0)
+        self.selStock['name']=self.stockListCtrl.GetItemText(index, 1)
         self.Close()
 
     def onSearchButton(self, event):
@@ -124,10 +116,10 @@ class SelStockWindow(wx.Frame):
         if len(search_text) > 0:
             db_stocks = dbSession.query(AStockTable).filter(or_(AStockTable.code.like('%'+search_text+'%'), AStockTable.name.like('%'+search_text+'%'))).all()
             if len(db_stocks) > 0:
-                self.stockList.DeleteAllItems()
+                self.stockListCtrl.DeleteAllItems()
                 for row in db_stocks:
-                    index = self.stockList.InsertItem(0, row.code)
-                    self.stockList.SetItem(index, 1, row.name)
+                    index = self.stockListCtrl.InsertItem(0, row.code)
+                    self.stockListCtrl.SetItem(index, 1, row.name)
 
 class MainWindow(wx.Frame):
     def __init__(self):
@@ -142,6 +134,7 @@ class MainWindow(wx.Frame):
         self.highLightShoushu = -1
         self.panQian = True
         self.panQianTime = time(9, 25, 0)
+        self.stocksDB = StocksDB()
         
         self.selWindow=None
         fileMenu=wx.Menu()
@@ -154,12 +147,14 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self.onExit, fileMenuExit)
         self.Bind(wx.EVT_SIZE, self.OnSize)
    
-        self.stockList=wx.ListCtrl(self.panel, style=wx.LC_REPORT)
-        self.stockList.InsertColumn(0, '股票代码')
-        self.stockList.InsertColumn(1, '股票名称')
-        self.stockList.SetColumnWidth(0, 150)
-        self.stockList.SetColumnWidth(1, 150)
-        self.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onStockListSelected, self.stockList)
+        self.stockListCtrl=wx.ListCtrl(self.panel, style=wx.LC_REPORT)
+        self.stockListCtrl.InsertColumn(0, '股票代码')
+        self.stockListCtrl.InsertColumn(1, '股票名称')
+        self.stockListCtrl.InsertColumn(2, '更新时间')
+        self.stockListCtrl.SetColumnWidth(0, 150)
+        self.stockListCtrl.SetColumnWidth(1, 150)
+        self.stockListCtrl.SetColumnWidth(2, 150)
+        self.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onStockListSelected, self.stockListCtrl)
   
         addStockButton=wx.Button(self.panel, -1, '添加')
         self.Bind(wx.EVT_BUTTON, self.onAddStock, addStockButton)
@@ -172,7 +167,7 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.onFilterShoushuClicked, filter_button)
 
         self.filterPanQianCtrl = wx.CheckBox(self.panel, label='过滤盘前竞价')
-        self.filterPanQianCtrl.Bind(wx.EVT_CHECKBOX, self.onfilterPanQianCtrl)
+        self.filterPanQianCtrl.Bind(wx.EVT_CHECKBOX, self.onFilterPanQianCtrl)
 
         self.highLightShoushuCtrl =wx.TextCtrl(self.panel)
         self.highLightShoushuCtrl.SetSizeWH(20, -1)
@@ -191,7 +186,7 @@ class MainWindow(wx.Frame):
         buttonSizer.Add(deleteStockButton)   
         listSizer=wx.BoxSizer(wx.VERTICAL)
  
-        listSizer.Add(self.stockList, 1, wx.EXPAND, 5)
+        listSizer.Add(self.stockListCtrl, 1, wx.EXPAND, 5)
         listSizer.Add(buttonSizer, 0, wx.EXPAND, 5)   
 
         grid_button_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -213,61 +208,50 @@ class MainWindow(wx.Frame):
 
         self.Show()
 
-    def loadData(self):
-        global dbSession
-        global dbEngine
-        index = self.stockList.GetFirstSelected()
+    def loadSelStockRTData(self):
+        index = self.stockListCtrl.GetFirstSelected()
         if index >= 0:
-            self.selStock['code'] = self.stockList.GetItemText(index, 0)
-            self.selStock['name'] = self.stockList.GetItemText(index, 1)
-            StockModel = get_model('stock_'+self.selStock['code'])
-            db_records = dbSession.query(StockModel).filter(StockModel.shoushu >= self.filterShoushu).order_by(StockModel.time.asc()).all()
-            if self.panQian == True:
-                self.stockRecordList = [record.to_dict() for record in db_records]
-            else:
-                self.stockRecordList.clear()
-                for record in db_records:
-                    if record.time.time() >= self.panQianTime:
-                        self.stockRecordList.append(record.to_dict())
-
+            self.selStock['code'] = self.stockListCtrl.GetItemText(index, 0)
+            self.selStock['name'] = self.stockListCtrl.GetItemText(index, 1)
+            self.stocksDB.reloadStockRTData(self.selStock)
 
     # def updateRecordList(self):
     #     global dbSession
     #     global dbEngine
-    #     index = self.stockList.GetFirstSelected()
+    #     index = self.stockListCtrl.GetFirstSelected()
     #     if index >= 0:
-    #         self.selStock['code'] = self.stockList.GetItemText(index, 0)
-    #         self.selStock['name'] = self.stockList.GetItemText(index, 1)
+    #         self.selStock['code'] = self.stockListCtrl.GetItemText(index, 0)
+    #         self.selStock['name'] = self.stockListCtrl.GetItemText(index, 1)
     #         StockModel = get_model('stock_'+self.selStock['code'])
     #         db_records = dbSession.query(StockModel).filter(StockModel.shoushu >= self.filterShoushu).order_by(StockModel.time.asc()).all()
     #         self.stockRecordList = [record.to_dict() for record in db_records] 
 
-    def onfilterPanQianCtrl(self, event):
+    def onFilterPanQianCtrl(self, event):
         refill_grid = False
         if self.filterPanQianCtrl.GetValue():
-            if(self.panQian == True):
+            if(self.stocksDB.getPanQian() == True):
                 refill_grid =  True
-                self.panQian = False
+                self.stocksDB.setPanQian(False)
         else:
-            if self.panQian == False:
+            if self.stocksDB.getPanQian() == False:
                 refill_grid = False
-                self.panQian = True
+                self.stocksDB.setPanQian(True)
         if refill_grid:
-            self.loadData()
-            self.fillGrid(self.stockRecordList)
+            self.loadSelStockRTData()
+            self.refillGrid()
 
     def onFilterShoushuClicked(self, event):
         filter_text = self.filterShoushuCtrl.GetValue().strip()
         if len(filter_text) > 0:
             self.filterShoushu = int(filter_text)
-            self.loadData()
-            self.fillGrid(self.stockRecordList)
+            self.loadSelStockRTData()
+            self.refillGrid()
 
     def onHighLightShoushuClicked(self, event):
         highlight_text = self.highLightShoushuCtrl.GetValue().strip()
         if len(highlight_text) > 0:
             self.highLightShoushu = int(highlight_text)
-            self.fillGrid(self.stockRecordList) 
+            self.refillGrid()
 
     def onScrollWin(self, event):
         event_type = event.GetEventType()
@@ -278,10 +262,10 @@ class MainWindow(wx.Frame):
     def scrollGrid(self, event_type):
         row_cnt = self.grid.GetNumberRows()
         if row_cnt <= 0:
-            self.loadData()
-        if len(self.stockRecordList) > 0:
+            self.loadSelStockRTData()
+        if len(self.stocksDB.getStockRTDataCnt()) > 0:
             if self.grid.IsVisible(row_cnt - 1, 0) and (event_type == wx.EVT_SCROLL_LINEDOWN or event_type == wx.EVT_SCROLL_PAGEDOWN):
-                if self.showEnd >= 0 and self.showEnd < len(self.stockRecordList):
+                if self.showEnd >= 0 and self.showEnd < len(self.stocksDB.getStockRTDataCnt()):
                     # 获取滚动条位置
                     (x_pos, y_pos) = self.grid.GetScrollPos(wx.VERTICAL)
                     # 获取滚动条的最大范围
@@ -297,7 +281,7 @@ class MainWindow(wx.Frame):
                     if y_pos == 0:
                         expand_cnt = min(5, (self.showStart * 3)//self.grid.GetNumberCols())
                         self.grid.InsertRows(0, expand_cnt)
-            self.fillGrid(self.stockRecordList)
+            self.refillGrid()
 
     def onKey(self, event):
         keycode = event.GetKeyCode()
@@ -350,10 +334,12 @@ class MainWindow(wx.Frame):
             row_index = row_index + 1
         return row_range
 
-    def fillGrid(self, record_list, start = 0, end = -1):
+    def refillGrid(self):
+        start = 0
+        end = -1
+        record_list = self.stocksDB.getStockRTData()
         row_range = self.getVisibleRowRange()
         cols_cnt = self.grid.GetNumberCols()
-        print(row_range)
         if len(row_range):
             tail_unvisiable_record = self.grid.GetNumberRows() - row_range[-1] - 1
             if 3*(len(record_list) - tail_unvisiable_record) > cols_cnt * len(row_range):
@@ -368,6 +354,8 @@ class MainWindow(wx.Frame):
         row_idx = 0
         while col_index < cols_cnt:
             row_idx = 0
+            if(record_index >= end):
+                break            
             while(True):
                 row = row_range[row_idx]
                 record = record_list[record_index]
@@ -403,8 +391,6 @@ class MainWindow(wx.Frame):
                     break
             if row_idx >= len(row_range):
                 col_index = col_index + 3
-            if(record_index >= end):
-                break
  
         if row_idx < len(row_range) or col_index < cols_cnt:
             while col_index < cols_cnt:
@@ -453,9 +439,9 @@ class MainWindow(wx.Frame):
         # self.showEnd = record_index
 
     def onStockListSelected(self, event):
-        self.loadData()
+        self.loadSelStockRTData()
         self.expandGrid()
-        self.fillGrid(self.stockRecordList)
+        self.refillGrid()
 
     def onAddStock(self, event):
         self.selWindow = SelStockWindow(self, wx.ID_ANY, '选择股票')
@@ -463,33 +449,22 @@ class MainWindow(wx.Frame):
         return
     
     def onDeleteStock(self, event):
-        global dbSession
-        index=self.stockList.GetFirstSelected()
+        index=self.stockListCtrl.GetFirstSelected()
         if index>=0:
-            id=self.stockList.GetItemData(index)
+            id=self.stockListCtrl.GetItemData(index)
             try:
-                stock_table=Table(StockTable.__tablename__, Base.metadata, autoload=True)
-                deleteQuery=stock_table.delete().where(stock_table.c.id==id)
-                dbSession.execute(deleteQuery)
-                dbSession.commit()
-                self.stockList.DeleteItem(index)
+                self.stocksDB.delFocusStocks(id)
+                self.stockListCtrl.DeleteItem(index)
             except Exception as e:
                 print(f"Error opening database: {e}")
 
     def addSelStock(self, stock_data):
-        global dbSession
-        global dbEngine
-        stocks=dbSession.query(StockTable).filter(StockTable.code==stock_data['code']).all()
-        if len(stocks) <= 0:
-            get_model('stock_'+stock_data['code'])
-            Base.metadata.create_all(dbEngine)
-            dbSession.add(StockTable(code=stock_data['code'], name=stock_data['name'], createAt=datetime.datetime.now(), updateAt=datetime.datetime.now()))
-            dbSession.commit()
-            row=dbSession.query(StockTable).filter(StockTable.code==stock_data['code']).one()
-            index = self.stockList.InsertItem(0, stock_data['code'])
-            self.stockList.SetItem(index, 1, stock_data['name'])
-            self.stockList.SetItemData(index, row.id)
-
+        addstock = self.stocksDB.addFocusStocks(stock_data)
+        if(addstock[1]):
+            index = self.stockListCtrl.InsertItem(-1, stock_data['code'])
+            self.stockListCtrl.SetItem(index, 1, stock_data['name'])
+            self.stockListCtrl.SetItem(index, 2, stock_data['updateAt'].date().strftime('%Y-%m-%d'))
+            self.stockListCtrl.SetItemData(index, stock_data['id'])
 
     def onSelClose(self, event):
         if(self.selWindow.selStock):
@@ -519,55 +494,53 @@ class MainWindow(wx.Frame):
             for col in range(self.grid.GetNumberCols()):
                 self.grid.SetCellValue(row, col, f"        ")
 
-    def addRecord(self, stock, record):
-        global dbEngine
-        global dbSession
+    # def addRecord(self, stock, record):
+    #     global dbEngine
+    #     global dbSession
 
-        StockModel = get_model('stock_' + stock['code'])
-        date_format = "%Y-%m-%d %H:%M:%S"
-        time = datetime.datetime.strptime(record['time'], date_format)
-        rows = dbSession.query(StockModel).filter(StockModel.time == time).all()
-        if len(rows) <= 0:
-            print(record)
-            dbSession.add(StockModel(time=time, price=float(record['price']), shoushu=int(record['shoushu']), bsbz=int(record['bsbz'])))
-            # dbSession.commit()
+    #     StockModel = get_model('stock_' + stock['code'])
+    #     date_format = "%Y-%m-%d %H:%M:%S"
+    #     time = datetime.datetime.strptime(record['time'], date_format)
+    #     rows = dbSession.query(StockModel).filter(StockModel.time == time).all()
+    #     if len(rows) <= 0:
+    #         print(record)
+    #         dbSession.add(StockModel(time=time, price=float(record['price']), shoushu=int(record['shoushu']), bsbz=int(record['bsbz'])))
+    #         dbSession.commit()
 
-    def readFromWeb(self, url, stock):
-        global dbSession
-        print(url)
-        response = requests.get(url, headers=global_header)
-        if response.status_code == 200:
-            response_data = response.json()
-            if response_data["msg"] == 'success':
-                for record in response_data['data']:
-                    self.addRecord(stock, record)
-        dbSession.commit()
+    # def readFromWeb(self, url, stock):
+    #     print(url)
+    #     response = requests.get(url, headers=global_header)
+    #     if response.status_code == 200:
+    #         response_data = response.json()
+    #         if response_data["msg"] == 'success':
+    #             for record in response_data['data']:
+    #                 self.addRecord(stock, record)
 
-    def updateStockRealTimeHistory(self, stock):
-        global dbSession
-        StockModel = get_model('stock_'+stock['code'])
-        Base.metadata.create_all(dbEngine)        
-        latest_record = dbSession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
-        readfromweb = True
-        latest_datetime = None
-        if latest_record:
-            time = latest_record.time
-            if time.date() >= datetime.datetime.now().date():
-                readfromweb = False
-            latest_datetime = time
-        if readfromweb:
-            ten_days_ago = datetime.datetime.now() - timedelta(days=10)
-            if not latest_datetime or latest_datetime < ten_days_ago:
-                latest_datetime = datetime.datetime.now() - timedelta(days=11)
-            while True:
-                latest_datetime = latest_datetime + timedelta(days=1)
-                format_latest_datetime = latest_datetime
-                datestr = format_latest_datetime.strftime('%Y-%m-%d')
-                url = global_stock_url.format(datestr, stock['code'])
-                self.readFromWeb(url, stock)
-                print(latest_datetime)
-                if latest_datetime.date() >= datetime.datetime.now().date():
-                    break
+    # def updateStockRealTimeHistory(self, stock):
+    #     global dbSession
+    #     StockModel = get_model('stock_'+stock['code'])
+    #     Base.metadata.create_all(dbEngine)        
+    #     latest_record = dbSession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
+    #     readfromweb = True
+    #     latest_datetime = None
+    #     if latest_record:
+    #         time = latest_record.time
+    #         if time.date() >= datetime.datetime.now().date():
+    #             readfromweb = False
+    #         latest_datetime = time
+    #     if readfromweb:
+    #         ten_days_ago = datetime.datetime.now() - timedelta(days=10)
+    #         if not latest_datetime or latest_datetime < ten_days_ago:
+    #             latest_datetime = datetime.datetime.now() - timedelta(days=11)
+    #         while True:
+    #             latest_datetime = latest_datetime + timedelta(days=1)
+    #             format_latest_datetime = latest_datetime
+    #             datestr = format_latest_datetime.strftime('%Y-%m-%d')
+    #             url = global_stock_url.format(datestr, stock['code'])
+    #             self.readFromWeb(url, stock)
+    #             print(latest_datetime)
+    #             if latest_datetime.date() >= datetime.datetime.now().date():
+    #                 break
 
  
     def onFileChanged(self, event):
@@ -582,21 +555,14 @@ class MainWindow(wx.Frame):
 
         if dbPath:
             try:
-                dbURI='sqlite:///'+dbPath+'?charset=utf8'
-                if not dbSession:
-                    dbEngine=create_engine(dbURI, echo=True)
-                    Session = sessionmaker(bind=dbEngine)
-                    dbSession=Session()
-                    Base.metadata.create_all(dbEngine)
-                    dbSession.commit()
-                stocks=dbSession.query(StockTable).all()
-                idx=0
+                self.stocksDB.create(dbPath)
+                stocks = self.stocksDB.loadFocusStocks()
                 for stock in stocks:
-                    self.updateStockRealTimeHistory(stock.to_dict())
-                    index=self.stockList.InsertItem(idx,stock.code)
-                    self.stockList.SetItem(index, 1, stock.name)
-                    self.stockList.SetItemData(index,stock.id)
-                    print(stock.id, stock.code, stock.name, stock.createAt, stock.updateAt)
+                    index=self.stockListCtrl.InsertItem(0,stock['code'])
+                    self.stockListCtrl.SetItem(index, 1, stock['name'])
+                    self.stockListCtrl.SetItem(index, 2, stock['updateAt'].date().strftime('%Y-%m-%d'))
+                    self.stockListCtrl.SetItemData(index,stock['id'])
+                    print(stock)
             except Exception as e:
                 print(f"Error opening database: {e}")
 
