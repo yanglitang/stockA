@@ -530,9 +530,10 @@ class MainWindow(wx.Frame):
         if len(rows) <= 0:
             print(record)
             dbSession.add(StockModel(time=time, price=float(record['price']), shoushu=int(record['shoushu']), bsbz=int(record['bsbz'])))
-            dbSession.commit()
+            # dbSession.commit()
 
     def readFromWeb(self, url, stock):
+        global dbSession
         print(url)
         response = requests.get(url, headers=global_header)
         if response.status_code == 200:
@@ -540,6 +541,7 @@ class MainWindow(wx.Frame):
             if response_data["msg"] == 'success':
                 for record in response_data['data']:
                     self.addRecord(stock, record)
+        dbSession.commit()
 
     def updateStockRealTimeHistory(self, stock):
         global dbSession
