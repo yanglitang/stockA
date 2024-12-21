@@ -45,5 +45,13 @@ def get_model(tablename):
         stock_class_dict[tablename] = Model
     return Model
 
-dbSession=None
-dbEngine=None
+g_dbsession=None
+g_dbengine=None
+
+g_header = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept':'*/*',
+    'Accept-Encoding':'gzip, deflate, br'
+}
+g_sina_stock_list_url='https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page={}&num={}&sort=symbol&asc=1&node=hs_a&symbol=&_s_r_a=sort'
+g_stockapi_rthistory_url='https://stockapi.com.cn/v1/base2/secondHistory?date={}&code={}'
