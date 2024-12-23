@@ -7,7 +7,7 @@ import copy
 import requests
 import json
 
-from data import AStockTable, StockTable, Base, g_dbsession, g_dbengine, get_model
+from data import AStockTable, StockTable, Base, get_model
 from data import g_header, g_sina_stock_list_url, g_stockapi_rthistory_url
 
 def print_function_name(func):
@@ -17,6 +17,8 @@ def print_function_name(func):
     return wrapper
 
 class StocksDB:
+    s_dbsession = None
+    s_dbengine = None
     def __init__(self):
         self.listFocusStocks = []
         self.listSelStockRecords = []
@@ -28,15 +30,14 @@ class StocksDB:
         self.dbPath = None
 
     def create(self, dbpath):
-        global g_dbsession
         self.dbPath = dbpath
         dbURI='sqlite:///'+dbpath+'?charset=utf8'
-        if not g_dbsession:
-            g_dbengine=create_engine(dbURI, echo=True)
-            Session = sessionmaker(bind=g_dbengine)
-            g_dbsession=Session()
-            Base.metadata.create_all(g_dbengine)
-            g_dbsession.commit()
+        if not StocksDB.s_dbsession:
+            StocksDB.s_dbengine=create_engine(dbURI, echo=True)
+            Session = sessionmaker(bind=StocksDB.s_dbengine)
+            StocksDB.s_dbsession=Session()
+            Base.metadata.create_all(StocksDB.s_dbengine)
+            StocksDB.s_dbsession.commit()
 
     def getStockRTData(self):
         self.lock.acquire()
@@ -63,27 +64,24 @@ class StocksDB:
         return self.panQian
 
     def __updateFocusStocksFromDB(self):
-        global g_dbsession
         self.lock.acquire()
-        stocks=g_dbsession.query(StockTable).all()
+        stocks=StocksDB.s_dbsession.query(StockTable).all()
         self.listFocusStocks = [stock.to_dict() for stock in stocks]
         self.lock.release()
 
     def loadFocusStocks(self):
-        # global g_dbsession
-        # global g_dbengine
         focus_list = []
         # self.lock.acquire()
         # # print(self.dbPath)
         # if self.dbPath:
         try:
             # dbURI='sqlite:///'+self.dbPath+'?charset=utf8'
-            # if not g_dbsession:
-            #     g_dbengine=create_engine(dbURI, echo=True)
-            #     Session = sessionmaker(bind=g_dbengine)
-            #     g_dbsession=Session()
-            #     Base.metadata.create_all(g_dbengine)
-            #     g_dbsession.commit()
+            # if not StocksDB.s_dbsession:
+            #     StocksDB.s_dbengine=create_engine(dbURI, echo=True)
+            #     Session = sessionmaker(bind=StocksDB.s_dbengine)
+            #     StocksDB.s_dbsession=Session()
+            #     Base.metadata.create_all(StocksDB.s_dbengine)
+            #     StocksDB.s_dbsession.commit()
             self.__updateFocusStocksFromDB()
         except Exception as e:
             print(f"Error opening database: {e}")
@@ -92,18 +90,66 @@ class StocksDB:
         # print(focus_list)
         return focus_list
     
+    def getDBAstocks(self):
+        self.lock.acquire()
+        db_stocks = StocksDB.s_dbsession.query(AStockTable).all()
+        stock_list = [db_stock.to_dict() for db_stock in db_stocks]
+        self.lock.release()
+        return stock_list
+    
+    def getAStocks(self):
+        stock_list = self.getDBAstocks()
+        if(len(stock_list)):
+            return stock_list
+        else:
+            stocks_cnt = 0
+            for i in range(1, 10000):
+                num = 80
+                url=g_sina_stock_list_url.format(i, num)
+                response = requests.get(url, headers=g_header)
+                if response.status_code == 200:
+                    response_data = response.json()
+                    for stock_data in response_data:
+                        self.addAStock(stock_data)
+                        stocks_cnt = stocks_cnt + 1
+                    if len(response_data) < num:
+                        break
+                else:
+                    print('请求失败, 状态码: {}'.format(response.status_code))
+                    break 
+        stock_list = self.getDBAstocks()
+        return stock_list
+    
+    def getAStockAlike(self, value):
+        stock_list = []
+        self.lock.acquire()
+        db_stocks = StocksDB.s_dbsession.query(AStockTable).filter(or_(AStockTable.code.like('%'+value+'%'), AStockTable.name.like('%'+value+'%'))).all()
+        if len(db_stocks) > 0:
+            stock_list = [db_stock.to_dict() for db_stock in db_stocks]
+        self.lock.release()
+        return stock_list
+    
+    def addAstock(self, stock_data):
+        self.lock.acquire()
+        db_stocks = StocksDB.s_dbsession.query(AStockTable).filter(AStockTable.code == stock_data['code']).all()
+        if len(db_stocks) <= 0:
+            StocksDB.s_dbsession.add(AStockTable(code=stock_data['code'], name=stock_data['name'], createAt=datetime.datetime.now(), updateAt=datetime.datetime.now()))
+            StocksDB.s_dbsession.commit()
+        self.lock.release()
+    
     def getStock(self, code):
+        self.lock.acquire()
         for stock in self.listFocusStocks:
             if(stock['code'] == code):
+                self.lock.release()
                 return stock
+        self.lock.release()
         return None
     
     def reloadStockRTData(self, stock):
-        global g_dbsession
-
         StockModel = get_model('stock_'+stock['code'])
         self.lock.acquire()
-        db_records = g_dbsession.query(StockModel).filter(StockModel.shoushu >= self.filterShoushu).order_by(StockModel.time.asc()).all()
+        db_records = StocksDB.s_dbsession.query(StockModel).filter(StockModel.shoushu >= self.filterShoushu).order_by(StockModel.time.asc()).all()
         if self.panQian == True:
             self.listSelStockRecords = [record.to_dict() for record in db_records]
         else:
@@ -114,33 +160,30 @@ class StocksDB:
         self.lock.release()
 
     def addFocusStocks(self, stock_data):
-        global g_dbsession
-        global g_dbengine     
         insert = True   
         self.lock.acquire()
-        stocks=g_dbsession.query(StockTable).filter(StockTable.code==stock_data['code']).all()
+        stocks=StocksDB.s_dbsession.query(StockTable).filter(StockTable.code==stock_data['code']).all()
         if len(stocks) <= 0:
             get_model('stock_'+stock_data['code'])
-            Base.metadata.create_all(g_dbengine)
-            g_dbsession.add(StockTable(code=stock_data['code'], name=stock_data['name'], createAt=datetime.datetime.now(), updateAt=(1970, 1, 1, 0, 0)))
-            g_dbsession.commit()
-            row=g_dbsession.query(StockTable).filter(StockTable.code==stock_data['code']).one()
+            Base.metadata.create_all(StocksDB.s_dbengine)
+            StocksDB.s_dbsession.add(StockTable(code=stock_data['code'], name=stock_data['name'], createAt=datetime.datetime.now(), updateAt=datetime.datetime(1970, 1, 1, 0, 0, 0)))
+            StocksDB.s_dbsession.commit()
+            row=StocksDB.s_dbsession.query(StockTable).filter(StockTable.code==stock_data['code']).one()
             self.__updateFocusStocksFromDB()
             insert = True
         else:
-            row=g_dbsession.query(StockTable).filter(StockTable.code==stock_data['code']).one()
+            row=StocksDB.s_dbsession.query(StockTable).filter(StockTable.code==stock_data['code']).one()
             insert = False
         self.lock.release()
         return (row.id, insert)
     
     def delFocusStocks(self, id):
-        global g_dbsession     
         self.lock.acquire()
         try:
             stock_table=Table(StockTable.__tablename__, Base.metadata, autoload=True)
             deleteQuery=stock_table.delete().where(stock_table.c.id==id)
-            g_dbsession.execute(deleteQuery)
-            g_dbsession.commit()
+            StocksDB.s_dbsession.execute(deleteQuery)
+            StocksDB.s_dbsession.commit()
             self.__updateFocusStocksFromDB()
         except Exception as e:
             print(f"Error opening database: {e}")
@@ -155,20 +198,16 @@ class StocksDB:
             self.updateStockRealTimeHistory(stock)
 
     def addRecord(self, stock, record):
-        global g_dbengine
-        global g_dbsession
-
         self.lock.acquire()
         StockModel = get_model('stock_' + stock['code'])
         date_format = "%Y-%m-%d %H:%M:%S"
         time = datetime.datetime.strptime(record['time'], date_format)
-        rows = g_dbsession.query(StockModel).filter(StockModel.time == time).all()
+        rows = StocksDB.s_dbsession.query(StockModel).filter(StockModel.time == time).all()
         if len(rows) <= 0:
-            g_dbsession.add(StockModel(time=time, price=float(record['price']), shoushu=int(record['shoushu']), bsbz=int(record['bsbz'])))
+            StocksDB.s_dbsession.add(StockModel(time=time, price=float(record['price']), shoushu=int(record['shoushu']), bsbz=int(record['bsbz'])))
         self.lock.release()
 
     def readFromWeb(self, url, stock):
-        global g_dbsession
         response = requests.get(url, headers=g_header)
         if response.status_code == 200:
             response_data = response.json()
@@ -176,25 +215,21 @@ class StocksDB:
                 for record in response_data['data']:
                     self.addRecord(stock, record)
                 self.lock.acquire()
-                g_dbsession.commit()
+                StocksDB.s_dbsession.commit()
                 self.lock.release()
 
     def updateFocusStockUpdateTime(self, stock, time):
-        global g_dbsession
         self.lock.acquire()
-        g_dbsession.query(StockTable).filter(StockTable.code == stock['code']).update({StockTable.updateAt: time})
+        StocksDB.s_dbsession.query(StockTable).filter(StockTable.code == stock['code']).update({StockTable.updateAt: time})
         self.lock.release()
 
         self.__updateFocusStocksFromDB()
 
     def updateStockRealTimeHistory(self, stock):
-        global g_dbsession
-        # global g_dbengine
-
         self.lock.acquire()
         StockModel = get_model('stock_'+stock['code'])
-        # Base.metadata.create_all(g_dbengine)        
-        latest_record = g_dbsession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
+        # Base.metadata.create_all(StocksDB.s_dbengine)        
+        latest_record = StocksDB.s_dbsession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
         self.lock.release()
 
         readfromweb = True
@@ -220,7 +255,7 @@ class StocksDB:
 
         self.lock.acquire()
         StockModel = get_model('stock_'+stock['code']) 
-        latest_record = g_dbsession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
+        latest_record = StocksDB.s_dbsession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
         if latest_record:
             self.updateFocusStockUpdateTime(stock, latest_record.time)
         self.lock.release()

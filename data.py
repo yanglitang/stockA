@@ -45,9 +45,6 @@ def get_model(tablename):
         stock_class_dict[tablename] = Model
     return Model
 
-g_dbsession=None
-g_dbengine=None
-
 g_header = {
     'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Accept':'*/*',

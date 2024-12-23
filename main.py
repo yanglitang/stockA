@@ -6,17 +6,22 @@ import xlrd
 import sqlite3
 from sqlalchemy import create_engine, Table, or_
 from sqlalchemy.orm import sessionmaker
-from data import AStockTable, StockTable, Base, g_dbsession, g_dbengine, get_model
+from data import AStockTable, StockTable, Base, get_model
 import datetime
 from datetime import timedelta, time, date
 import requests
 import json
 from StocksDB import StocksDB
 from SelStockWindow import SelStockWindow
-from GlobalInstance import g_mainwnd
+from GlobalInstance import get_mainwnd, set_mainwnd
 from apscheduler.schedulers.background import BackgroundScheduler
+import matplotlib
+matplotlib.use('WXAgg')
+from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 GREEN_COLOR = (0x00,0xB0,0x50)
+FIGURE_CANVAS_HEIGHT_INCHE = 2
 
 # class DBUpdatedEvent(wx.PyCommandEvent):
 #     def __init__(self, eventType=..., id=0):
@@ -36,11 +41,10 @@ class DBUpdatedEvent(wx.PyEvent):
         self.data = data
 
 def update_db_from_internet():
-    global g_mainwnd
-    stock_list = g_mainwnd.stocksDB.loadFocusStocks()
+    stock_list = get_mainwnd().stocksDB.loadFocusStocks()
     for stock in stock_list:
-        g_mainwnd.stocksDB.updateStockRealTimeHistory(stock)
-        wx.PostEvent(g_mainwnd, DBUpdatedEvent(0))
+        get_mainwnd().stocksDB.updateStockRealTimeHistory(stock)
+        wx.PostEvent(get_mainwnd(), DBUpdatedEvent(0))
 
 class MainWindow(wx.Frame):
     def __init__(self):
@@ -54,7 +58,9 @@ class MainWindow(wx.Frame):
         self.highLightShoushu = -1
         self.stocksDB = StocksDB()
         self.listctlStocks = []
-        
+         
+        screen_dc = wx.ScreenDC()
+        self.pixelAccuracy = (screen_dc.GetPPI()[0], screen_dc.GetPPI()[1])
         self.selWindow=None
         fileMenu=wx.Menu()
         fileMenuOpen=fileMenu.Append(-1,'打开','打开数据库')
@@ -101,6 +107,13 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MAXIMIZE, self.onMaxiMize)
 
         EVT_DB_UPDATED(self, self.onDBUpdated)
+
+        # self.figure = Figure(figsize=(20, FIGURE_CANVAS_HEIGHT_INCHE), dpi=self.pixelAccuracy[0])
+        # self.axes = self.figure.add_subplot(1, 1, 1)
+        # x = [1, 2, 3, 4, 5]
+        # y = [2, 4, 6, 8, 10]
+        # self.axes.plot(x, y)
+        # self.canvas = FigureCanvas(self.panel, -1, self.figure)
         # self.Bind(wx.EVT_SCROLL_LINEUP, self.onScrollUp, self.grid.GetVerticalScroller())
         # self.Bind(wx.EVT_SCROLL_BOTTOM, self.onScrollDown, self.grid.GetVerticalScroller())
 
@@ -119,17 +132,21 @@ class MainWindow(wx.Frame):
         grid_button_sizer.Add(self.highLightShoushuCtrl)
         grid_button_sizer.Add(highlight_button)
 
-        grid_sizer = wx.BoxSizer(wx.VERTICAL)
-        grid_sizer.Add(grid_button_sizer, 0, wx.EXPAND, 5)
-        grid_sizer.Add(self.grid, 1, wx.EXPAND, 5)
+        self.gridSizer = wx.BoxSizer(wx.VERTICAL)
+        self.gridSizer.Add(grid_button_sizer, 0, wx.EXPAND, 5)
+        self.gridSizer.Add(self.grid, 1, wx.EXPAND, 5)
+        # self.gridSizer.Add(self.canvas, 0, wx.EXPAND, 5)
 
         panelSizer=wx.BoxSizer(wx.HORIZONTAL)
         panelSizer.Add(listSizer, 0, wx.EXPAND)
-        panelSizer.Add(grid_sizer, 1, wx.EXPAND)
+        panelSizer.Add(self.gridSizer, 1, wx.EXPAND)
         
         self.panel.SetSizer(panelSizer)
 
         self.Show()
+
+    def getStockDB(self):
+        return self.stocksDB
 
     def loadSelStockRTData(self):
         index = self.stockListCtrl.GetFirstSelected()
@@ -137,17 +154,6 @@ class MainWindow(wx.Frame):
             self.selStock['code'] = self.stockListCtrl.GetItemText(index, 0)
             self.selStock['name'] = self.stockListCtrl.GetItemText(index, 1)
             self.stocksDB.reloadStockRTData(self.selStock)
-
-    # def updateRecordList(self):
-    #     global g_dbsession
-    #     global g_dbengine
-    #     index = self.stockListCtrl.GetFirstSelected()
-    #     if index >= 0:
-    #         self.selStock['code'] = self.stockListCtrl.GetItemText(index, 0)
-    #         self.selStock['name'] = self.stockListCtrl.GetItemText(index, 1)
-    #         StockModel = get_model('stock_'+self.selStock['code'])
-    #         db_records = g_dbsession.query(StockModel).filter(StockModel.shoushu >= self.filterShoushu).order_by(StockModel.time.asc()).all()
-    #         self.stockRecordList = [record.to_dict() for record in db_records] 
 
     def onFilterPanQianCtrl(self, event):
         refill_grid = False
@@ -219,10 +225,34 @@ class MainWindow(wx.Frame):
 
     def OnSize(self, event):
         self.expandGrid()
+        # width, height = self.panel.GetClientSize()
+        # width, height = self.gridSizer.GetSize()
+        # print(width, self.pixelAccuracy[0])
+        # print(self.gridSizer.GetSize())
+        # if(width > 0):
+        #     fig_width = width / self.pixelAccuracy[0]
+        #     fig_height = FIGURE_CANVAS_HEIGHT_INCHE
+        #     self.figure.set_size_inches(fig_width, fig_height)
+        #     self.axes.relim()
+        #     self.axes.autoscale_view(True, True, True)
+        #     self.canvas.draw()
+        # row_range = self.getVisibleRowRange()
+        # print(len(row_range), 6, 6*len(row_range))
         event.Skip()
 
     def onMaxiMize(self, event):
         self.refillSelStockData()
+        # width, height = self.panel.GetClientSize()
+        # width, height = self.gridSizer.GetSize()
+        # print(width, self.pixelAccuracy[0])
+        # print(self.gridSizer.GetSize())
+        # if(width > 0):
+        #     fig_width = width / self.pixelAccuracy[0]
+        #     fig_height = FIGURE_CANVAS_HEIGHT_INCHE
+        #     self.figure.set_size_inches(fig_width, fig_height)
+        #     self.axes.relim()
+        #     self.axes.autoscale_view(True, True, True)
+        #     self.canvas.draw()
         event.Skip()
 
     def expandGrid(self):
@@ -341,6 +371,8 @@ class MainWindow(wx.Frame):
 
         self.grid.Refresh()
 
+        # self.redrawLineChart(record_list[start:record_index])
+
         # if end < 0:
         #     end = len(record_list)
         # if start >= end:
@@ -373,6 +405,14 @@ class MainWindow(wx.Frame):
         #     col_index = col_index + 3
         # self.showEnd = record_index
 
+    def redrawLineChart(self, recrod_list):
+        x = [record['time'] for record in recrod_list]
+        y = [record['price'] for record in recrod_list]
+        self.axes.plot(x, y)
+        self.axes.relim()
+        self.axes.autoscale_view(True, True, True)
+        self.canvas.draw()
+
     def refillSelStockData(self):
         self.loadSelStockRTData()
         self.expandGrid()
@@ -399,6 +439,7 @@ class MainWindow(wx.Frame):
     def addSelStock(self, stock_data):
         addstock = self.stocksDB.addFocusStocks(stock_data)
         if(addstock[1]):
+            stock_data = self.stocksDB.getStock(stock_data['code'])
             insertpos = self.stockListCtrl.GetItemCount()
             index = self.stockListCtrl.InsertItem(insertpos, stock_data['code'])
             self.stockListCtrl.SetItem(index, 1, stock_data['name'])
@@ -433,54 +474,6 @@ class MainWindow(wx.Frame):
             for col in range(self.grid.GetNumberCols()):
                 self.grid.SetCellValue(row, col, f"        ")
 
-    # def addRecord(self, stock, record):
-    #     global g_dbengine
-    #     global g_dbsession
-
-    #     StockModel = get_model('stock_' + stock['code'])
-    #     date_format = "%Y-%m-%d %H:%M:%S"
-    #     time = datetime.datetime.strptime(record['time'], date_format)
-    #     rows = g_dbsession.query(StockModel).filter(StockModel.time == time).all()
-    #     if len(rows) <= 0:
-    #         print(record)
-    #         g_dbsession.add(StockModel(time=time, price=float(record['price']), shoushu=int(record['shoushu']), bsbz=int(record['bsbz'])))
-    #         g_dbsession.commit()
-
-    # def readFromWeb(self, url, stock):
-    #     print(url)
-    #     response = requests.get(url, headers=g_header)
-    #     if response.status_code == 200:
-    #         response_data = response.json()
-    #         if response_data["msg"] == 'success':
-    #             for record in response_data['data']:
-    #                 self.addRecord(stock, record)
-
-    # def updateStockRealTimeHistory(self, stock):
-    #     global g_dbsession
-    #     StockModel = get_model('stock_'+stock['code'])
-    #     Base.metadata.create_all(g_dbengine)        
-    #     latest_record = g_dbsession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
-    #     readfromweb = True
-    #     latest_datetime = None
-    #     if latest_record:
-    #         time = latest_record.time
-    #         if time.date() >= datetime.datetime.now().date():
-    #             readfromweb = False
-    #         latest_datetime = time
-    #     if readfromweb:
-    #         ten_days_ago = datetime.datetime.now() - timedelta(days=10)
-    #         if not latest_datetime or latest_datetime < ten_days_ago:
-    #             latest_datetime = datetime.datetime.now() - timedelta(days=11)
-    #         while True:
-    #             latest_datetime = latest_datetime + timedelta(days=1)
-    #             format_latest_datetime = latest_datetime
-    #             datestr = format_latest_datetime.strftime('%Y-%m-%d')
-    #             url = g_stockapi_rhistory_url.format(datestr, stock['code'])
-    #             self.readFromWeb(url, stock)
-    #             print(latest_datetime)
-    #             if latest_datetime.date() >= datetime.datetime.now().date():
-    #                 break
-
     def onDBUpdated(self, event):
         for idx in range(0, self.stockListCtrl.GetItemCount()):
             code = self.stockListCtrl.GetItemText(idx, 0)
@@ -490,8 +483,6 @@ class MainWindow(wx.Frame):
         self.refillSelStockData()
 
     def onFileChanged(self, event):
-        global g_dbsession
-        global g_dbengine
         dbPath=None
         
         fileDialog=wx.FileDialog(self,'打开', wildcard='*.*', style=wx.FD_OPEN)
@@ -522,5 +513,6 @@ class MainWindow(wx.Frame):
         self.Close()
 
 app = wx.App(False)
-g_mainwnd = MainWindow()
+wnd = MainWindow()
+set_mainwnd(wnd)
 app.MainLoop()
