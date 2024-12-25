@@ -218,6 +218,61 @@ class StocksDB:
                 StocksDB.s_dbsession.commit()
                 self.lock.release()
 
+    def createAllRTTable(self):
+        stock_list = self.getAStocks()
+        self.lock.acquire()
+        for stock in stock_list:
+            get_model('stock_'+stock['code'])
+        Base.metadata.create_all(StocksDB.s_dbengine)
+        self.lock.release()
+
+    def __updateStockRT(self, stock, response_data):
+        if(response_data['data'] and response_data['data']['details']):
+            record_list = response_data['data']['details']
+            for record_str in record_list:
+                record = {}
+                split_record = record_str.split(',')
+                real_date = None
+                if(datetime.datetime.now().time() < self.panQianTime):
+                    real_date = datetime.datetime.now().date() - timedelta(days=1)
+                else:
+                    real_date = datetime.datetime.now().date()              
+                record['time'] = real_date.strftime('%Y-%m-%d') + ' ' + split_record[0]
+                record['price'] = split_record[1]
+                record['shoushu'] = split_record[2]
+                record['bsbz'] = split_record[4]
+                self.addRecord(stock, record)
+            self.lock.acquire()
+            StocksDB.s_dbsession.commit()
+            self.lock.release()
+
+    def updateStockRT(self, stock):
+        mcode = '0'
+        if(stock['code'][0] == '3' or \
+           stock['code'][0] == '0' or \
+           stock['code'][0] == '4' or \
+            stock['code'][0] == '8' or \
+                stock['code'][0] == '9'):
+            mcode = '0'
+        elif(stock['code'][0] == '6'):
+            mcode = '1'
+
+        readfromweb, latest_datetime = self.isReadFromWeb(stock)
+        if(readfromweb):
+            url = f'https://16.push2.eastmoney.com/api/qt/stock/details/sse?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55&mpi=2000&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&pos=-0&secid={mcode}.{stock['code']}&wbp2u=|0|0|0|web'
+            with requests.get(url, headers=g_header, stream=True) as response:
+                for line in response.iter_lines():
+                    if line and line.startswith(b'data:'):
+                        data_str = line[5:].decode('utf-8')
+                        response = json.loads(data_str)
+                        self.__updateStockRT(stock, response)
+                        break
+
+    def updateAStockRT(self):
+        stock_list = self.getAStocks()
+        for stock in stock_list:
+            self.updateStockRT(stock)
+
     def updateFocusStockUpdateTime(self, stock, time):
         self.lock.acquire()
         StocksDB.s_dbsession.query(StockTable).filter(StockTable.code == stock['code']).update({StockTable.updateAt: time})
@@ -225,7 +280,7 @@ class StocksDB:
 
         self.__updateFocusStocksFromDB()
 
-    def updateStockRealTimeHistory(self, stock):
+    def isReadFromWeb(self, stock):
         self.lock.acquire()
         StockModel = get_model('stock_'+stock['code'])
         # Base.metadata.create_all(StocksDB.s_dbengine)        
@@ -239,6 +294,11 @@ class StocksDB:
             if time.date() >= datetime.datetime.now().date():
                 readfromweb = False
             latest_datetime = time
+
+        return readfromweb, latest_datetime
+
+    def updateStockRealTimeHistory(self, stock):
+        readfromweb, latest_datetime = self.isReadFromWeb(stock)
         if readfromweb:
             ten_days_ago = datetime.datetime.now() - timedelta(days=10)
             if not latest_datetime or latest_datetime < ten_days_ago:

@@ -23,12 +23,6 @@ from matplotlib.figure import Figure
 GREEN_COLOR = (0x00,0xB0,0x50)
 FIGURE_CANVAS_HEIGHT_INCHE = 2
 
-# class DBUpdatedEvent(wx.PyCommandEvent):
-#     def __init__(self, eventType=..., id=0):
-#         wx.PyCommandEvent.__init__(self, eventType, id)
-
-# myEVT_DB_UPDATED = wx.NewEventType()
-# EVT_DB_UPDATED = wx.PyEventBinder(myEVT_DB_UPDATED, 1)
 EVT_DB_UPDATED_ID = wx.NewId()
 
 def EVT_DB_UPDATED(wnd, func):
@@ -45,6 +39,7 @@ def update_db_from_internet():
     for stock in stock_list:
         get_mainwnd().stocksDB.updateStockRealTimeHistory(stock)
         wx.PostEvent(get_mainwnd(), DBUpdatedEvent(0))
+    get_mainwnd().stocksDB.updateAStockRT()
 
 class MainWindow(wx.Frame):
     def __init__(self):
@@ -107,15 +102,6 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MAXIMIZE, self.onMaxiMize)
 
         EVT_DB_UPDATED(self, self.onDBUpdated)
-
-        # self.figure = Figure(figsize=(20, FIGURE_CANVAS_HEIGHT_INCHE), dpi=self.pixelAccuracy[0])
-        # self.axes = self.figure.add_subplot(1, 1, 1)
-        # x = [1, 2, 3, 4, 5]
-        # y = [2, 4, 6, 8, 10]
-        # self.axes.plot(x, y)
-        # self.canvas = FigureCanvas(self.panel, -1, self.figure)
-        # self.Bind(wx.EVT_SCROLL_LINEUP, self.onScrollUp, self.grid.GetVerticalScroller())
-        # self.Bind(wx.EVT_SCROLL_BOTTOM, self.onScrollDown, self.grid.GetVerticalScroller())
 
         buttonSizer=wx.BoxSizer(wx.HORIZONTAL)
         buttonSizer.Add(addStockButton)
@@ -225,34 +211,10 @@ class MainWindow(wx.Frame):
 
     def OnSize(self, event):
         self.expandGrid()
-        # width, height = self.panel.GetClientSize()
-        # width, height = self.gridSizer.GetSize()
-        # print(width, self.pixelAccuracy[0])
-        # print(self.gridSizer.GetSize())
-        # if(width > 0):
-        #     fig_width = width / self.pixelAccuracy[0]
-        #     fig_height = FIGURE_CANVAS_HEIGHT_INCHE
-        #     self.figure.set_size_inches(fig_width, fig_height)
-        #     self.axes.relim()
-        #     self.axes.autoscale_view(True, True, True)
-        #     self.canvas.draw()
-        # row_range = self.getVisibleRowRange()
-        # print(len(row_range), 6, 6*len(row_range))
         event.Skip()
 
     def onMaxiMize(self, event):
         self.refillSelStockData()
-        # width, height = self.panel.GetClientSize()
-        # width, height = self.gridSizer.GetSize()
-        # print(width, self.pixelAccuracy[0])
-        # print(self.gridSizer.GetSize())
-        # if(width > 0):
-        #     fig_width = width / self.pixelAccuracy[0]
-        #     fig_height = FIGURE_CANVAS_HEIGHT_INCHE
-        #     self.figure.set_size_inches(fig_width, fig_height)
-        #     self.axes.relim()
-        #     self.axes.autoscale_view(True, True, True)
-        #     self.canvas.draw()
         event.Skip()
 
     def expandGrid(self):
@@ -371,40 +333,6 @@ class MainWindow(wx.Frame):
 
         self.grid.Refresh()
 
-        # self.redrawLineChart(record_list[start:record_index])
-
-        # if end < 0:
-        #     end = len(record_list)
-        # if start >= end:
-        #     start = 0
-        # rows_cnt = self.grid.GetNumberRows()
-        # cols_cnt = self.grid.GetNumberCols()
-        # if 3*(end-start) > rows_cnt * cols_cnt:
-        #     start = int(end - rows_cnt * cols_cnt / 3)
-        # col_index = 0
-        # record_index = start
-        # self.showStart = start
-        # while col_index < cols_cnt:
-        #     for row in range(0, rows_cnt):
-        #         record = record_list[record_index]
-        #         self.grid.SetCellTextColour(row, col_index, wx.LIGHT_GREY)
-        #         self.grid.SetCellValue(row, col_index, record['time'].strftime('%Y-%m-%d %H:%M:%S'))
-
-        #         text_color = self.getTextColor(record)
-        #         self.grid.SetCellTextColour(row, col_index + 1, text_color)
-        #         self.grid.SetCellValue(row, col_index + 1, str(record['price']))
-
-        #         self.grid.SetCellTextColour(row, col_index + 2, text_color)
-        #         self.grid.SetCellValue(row, col_index + 2, str(record['shoushu']))
-
-        #         record_index = record_index + 1
-        #         if(record_index >= end):
-        #             break
-        #     if(record_index >= end):
-        #         break
-        #     col_index = col_index + 3
-        # self.showEnd = record_index
-
     def redrawLineChart(self, recrod_list):
         x = [record['time'] for record in recrod_list]
         y = [record['price'] for record in recrod_list]
@@ -455,13 +383,6 @@ class MainWindow(wx.Frame):
         # 定义网格的列数和列标题
         self.grid.CreateGrid(0, 18)
         self.grid.SetDefaultRowSize(20)
-        # attr = wx.grid.GridCellAttr()
-        # attr.Set
-        # attr.SetBottomBorder(wx.grid.GRID_BORDER_SOLID)
-        # attr.SetTopBorder(wx.grid.GRID_BORDER_SOLID)
-        # attr.SetLeftBorder(wx.grid.GRID_BORDER_SOLID)
-        # attr.SetRightBorder(wx.grid.GRID_BORDER_SOLID)
-        # self.grid.SetDefaultCellAttr(attr)
         self.grid.SetRowLabelSize(0)  # 设置行标签的大小
         self.grid.SetColLabelSize(20)  # 设置列标签的大小
         for i in range(0, 6):
@@ -475,12 +396,21 @@ class MainWindow(wx.Frame):
                 self.grid.SetCellValue(row, col, f"        ")
 
     def onDBUpdated(self, event):
+        sel_stock_updated = False
+        sel_stock_last_update_time = ''
+        sel_stock_idx = self.stockListCtrl.GetFirstSelected()
         for idx in range(0, self.stockListCtrl.GetItemCount()):
             code = self.stockListCtrl.GetItemText(idx, 0)
+            if(idx == sel_stock_idx):
+                sel_stock_last_update_time = self.stockListCtrl.GetItemText(idx, 2)
             stock = self.stocksDB.getStock(code)
             if(stock):
                 self.stockListCtrl.SetItem(idx, 2, stock['updateAt'].date().strftime('%Y-%m-%d'))
-        self.refillSelStockData()
+                tmp_text = self.stockListCtrl.GetItemText(idx, 2)
+                if(tmp_text != sel_stock_last_update_time):
+                    sel_stock_updated =  True
+        if(sel_stock_updated):
+            self.refillSelStockData()
 
     def onFileChanged(self, event):
         dbPath=None
@@ -494,6 +424,7 @@ class MainWindow(wx.Frame):
             try:
                 self.stocksDB.create(dbPath)
                 stocks = self.stocksDB.loadFocusStocks()
+                self.stocksDB.createAllRTTable()
                 self.listctlStocks = sorted(stocks, key=lambda x:x["code"])
                 for stock in self.listctlStocks:
                     insertpos = self.stockListCtrl.GetItemCount()
@@ -504,7 +435,7 @@ class MainWindow(wx.Frame):
 
                 #定期从互联网上更新数据到数据库中
                 update_db_task = BackgroundScheduler()
-                update_db_task.add_job(update_db_from_internet, 'interval', seconds=600, coalesce=True, max_instances=1)
+                update_db_task.add_job(update_db_from_internet, 'interval', seconds=5, coalesce=True, max_instances=1)
                 update_db_task.start()
             except Exception as e:
                 print(f"Error opening database: {e}")
