@@ -34,6 +34,7 @@ class StockRealTimeHistory(Base):
     time = Column(DateTime)
     price = Column(Float)
     shoushu = Column(Integer)
+    danshu = Column(Integer)
     bsbz = Column(Integer)
     
 def get_model(tablename):
@@ -52,3 +53,4 @@ g_header = {
 }
 g_sina_stock_list_url='https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page={}&num={}&sort=symbol&asc=1&node=hs_a&symbol=&_s_r_a=sort'
 g_stockapi_rthistory_url='https://stockapi.com.cn/v1/base2/secondHistory?date={}&code={}'
+
