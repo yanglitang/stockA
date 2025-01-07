@@ -1,3 +1,4 @@
+import psycopg
 import threading
 from datetime import timedelta, time, date
 from sqlalchemy import create_engine, Table, or_
@@ -9,6 +10,9 @@ import json
 
 from data import AStockTable, StockTable, Base, get_model
 from data import g_header, g_sina_stock_list_url, g_stockapi_rthistory_url
+
+from urllib.parse import quote_plus
+from trade_calendar import get_previous_tradeday, sse_is_tradeday
 
 def print_function_name(func):
     def wrapper(*args, **kwargs):
@@ -27,13 +31,29 @@ class StocksDB:
         self.highLightShoushu = -1
         self.panQian = True
         self.panQianTime = time(9, 25, 0)
+        self.panHouTime = time(15, 0, 0)
         self.dbPath = None
+        self.username = 'stocka'
+        self.password = 'stocka@123'
+        self.host = '47.96.230.23'
+        self.port = 15234
+        self.database_name = 'stocka'   
 
     def create(self, dbpath):
         self.dbPath = dbpath
         dbURI='sqlite:///'+dbpath+'?charset=utf8'
         if not StocksDB.s_dbsession:
             StocksDB.s_dbengine=create_engine(dbURI, echo=True)
+            Session = sessionmaker(bind=StocksDB.s_dbengine)
+            StocksDB.s_dbsession=Session()
+            Base.metadata.create_all(StocksDB.s_dbengine)
+            StocksDB.s_dbsession.commit()
+
+    def createPG(self):
+        pwd = quote_plus(self.password)
+        dbURI=f"postgresql+psycopg://{self.username}:{pwd}@{self.host}:{self.port}/{self.database_name}"
+        if not StocksDB.s_dbsession:
+            StocksDB.s_dbengine=create_engine(dbURI, echo=False)
             Session = sessionmaker(bind=StocksDB.s_dbengine)
             StocksDB.s_dbsession=Session()
             Base.metadata.create_all(StocksDB.s_dbengine)
@@ -129,7 +149,7 @@ class StocksDB:
         self.lock.release()
         return stock_list
     
-    def addAstock(self, stock_data):
+    def addAStock(self, stock_data):
         self.lock.acquire()
         db_stocks = StocksDB.s_dbsession.query(AStockTable).filter(AStockTable.code == stock_data['code']).all()
         if len(db_stocks) <= 0:
@@ -159,6 +179,16 @@ class StocksDB:
                     self.listSelStockRecords.append(record.to_dict())        
         self.lock.release()
 
+    def getLatestUpdateTime(self, stock):
+        latest_update_time = datetime.datetime(1970, 1, 1, 0, 0, 0)
+        self.lock.acquire()
+        StockModel = get_model('stock_'+stock['code']) 
+        latest_record = StocksDB.s_dbsession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
+        if latest_record:
+            latest_update_time = latest_record.time
+        self.lock.release()
+        return latest_update_time  
+
     def addFocusStocks(self, stock_data):
         insert = True   
         self.lock.acquire()
@@ -166,7 +196,8 @@ class StocksDB:
         if len(stocks) <= 0:
             get_model('stock_'+stock_data['code'])
             Base.metadata.create_all(StocksDB.s_dbengine)
-            StocksDB.s_dbsession.add(StockTable(code=stock_data['code'], name=stock_data['name'], createAt=datetime.datetime.now(), updateAt=datetime.datetime(1970, 1, 1, 0, 0, 0)))
+            update_time = self.getLatestUpdateTime(stock_data)
+            StocksDB.s_dbsession.add(StockTable(code=stock_data['code'], name=stock_data['name'], createAt=datetime.datetime.now(), updateAt=update_time))
             StocksDB.s_dbsession.commit()
             row=StocksDB.s_dbsession.query(StockTable).filter(StockTable.code==stock_data['code']).one()
             self.__updateFocusStocksFromDB()
@@ -204,7 +235,7 @@ class StocksDB:
         time = datetime.datetime.strptime(record['time'], date_format)
         rows = StocksDB.s_dbsession.query(StockModel).filter(StockModel.time == time).all()
         if len(rows) <= 0:
-            StocksDB.s_dbsession.add(StockModel(time=time, price=float(record['price']), shoushu=int(record['shoushu']), bsbz=int(record['bsbz'])))
+            StocksDB.s_dbsession.add(StockModel(time=time, price=float(record['price']), shoushu=int(record['shoushu']), danshu=int(record['danshu']), bsbz=int(record['bsbz'])))
         self.lock.release()
 
     def readFromWeb(self, url, stock):
@@ -226,20 +257,16 @@ class StocksDB:
         Base.metadata.create_all(StocksDB.s_dbengine)
         self.lock.release()
 
-    def __updateStockRT(self, stock, response_data):
+    def __updateStockRT(self, stock, response_data, update_date):
         if(response_data['data'] and response_data['data']['details']):
             record_list = response_data['data']['details']
             for record_str in record_list:
                 record = {}
-                split_record = record_str.split(',')
-                real_date = None
-                if(datetime.datetime.now().time() < self.panQianTime):
-                    real_date = datetime.datetime.now().date() - timedelta(days=1)
-                else:
-                    real_date = datetime.datetime.now().date()              
-                record['time'] = real_date.strftime('%Y-%m-%d') + ' ' + split_record[0]
+                split_record = record_str.split(',')     
+                record['time'] = update_date.strftime('%Y-%m-%d') + ' ' + split_record[0]
                 record['price'] = split_record[1]
                 record['shoushu'] = split_record[2]
+                record['danshu'] = split_record[3]
                 record['bsbz'] = split_record[4]
                 self.addRecord(stock, record)
             self.lock.acquire()
@@ -261,12 +288,30 @@ class StocksDB:
         if(readfromweb):
             url = f'https://16.push2.eastmoney.com/api/qt/stock/details/sse?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55&mpi=2000&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&pos=-0&secid={mcode}.{stock['code']}&wbp2u=|0|0|0|web'
             with requests.get(url, headers=g_header, stream=True) as response:
+                time_now = datetime.datetime.now()
+                update_date = time_now.date()
+                if(sse_is_tradeday(time_now.date())):
+                    if(time_now.time() < self.panQianTime):
+                        update_date = get_previous_tradeday(time_now.date())
+                    else:
+                        update_date = time_now.date()
+                else:
+                    update_date = get_previous_tradeday(time_now.date())
+                print(f'update stock from web, stock: {stock['code']}, update date: {update_date}')
                 for line in response.iter_lines():
                     if line and line.startswith(b'data:'):
                         data_str = line[5:].decode('utf-8')
                         response = json.loads(data_str)
-                        self.__updateStockRT(stock, response)
+                        self.__updateStockRT(stock, response, update_date)
                         break
+
+                self.lock.acquire()
+                StockModel = get_model('stock_'+stock['code']) 
+                latest_record = StocksDB.s_dbsession.query(StockModel).order_by(StockModel.time.desc()).limit(1).first()
+                if latest_record:
+                    self.updateFocusStockUpdateTime(stock, latest_record.time)
+                    self.updateAStockUpdateTime(stock, latest_record.time)
+                self.lock.release()                   
 
     def updateAStockRT(self):
         stock_list = self.getAStocks()
@@ -280,6 +325,11 @@ class StocksDB:
 
         self.__updateFocusStocksFromDB()
 
+    def updateAStockUpdateTime(self, stock, time):
+        self.lock.acquire()
+        StocksDB.s_dbsession.query(AStockTable).filter(AStockTable.code == stock['code']).update({AStockTable.updateAt: time})
+        self.lock.release()
+
     def isReadFromWeb(self, stock):
         self.lock.acquire()
         StockModel = get_model('stock_'+stock['code'])
@@ -291,9 +341,38 @@ class StocksDB:
         latest_datetime = None
         if latest_record:
             time = latest_record.time
-            if time.date() >= datetime.datetime.now().date():
-                readfromweb = False
+            if(time.time() < self.panHouTime):
+                to_compare = datetime.datetime.now()
+                if(sse_is_tradeday(to_compare.date())):
+                    if(to_compare.time() >= self.panQianTime and to_compare.time() <= self.panHouTime):
+                        readfromweb = False
+                    else:
+                        readfromweb = True
+                else:
+                    readfromweb = True
+            else:
+                to_compare = datetime.datetime.now().date()
+                if(not sse_is_tradeday(to_compare)):
+                    to_compare = get_previous_tradeday(to_compare)
+                    if(time.date() < to_compare):
+                        readfromweb = True
+                    else:
+                        readfromweb = False
+                else:
+                    if(datetime.datetime.now().time() >= self.panQianTime\
+                        and datetime.datetime.now().time() <= self.panHouTime):
+                        readfromweb = False
+                    else:
+                        if(datetime.datetime.now().time() < self.panQianTime):
+                            to_compare = get_previous_tradeday(to_compare)
+                        if(time.date() < to_compare):
+                            readfromweb = True
+                        else:
+                            readfromweb = False
             latest_datetime = time
+        else:
+            readfromweb = True
+            latest_datetime = datetime.datetime(1970,1,1,0,0,0)
 
         return readfromweb, latest_datetime
 

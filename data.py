@@ -1,3 +1,4 @@
+import psycopg
 from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -34,6 +35,7 @@ class StockRealTimeHistory(Base):
     time = Column(DateTime)
     price = Column(Float)
     shoushu = Column(Integer)
+    danshu = Column(Integer)
     bsbz = Column(Integer)
     
 def get_model(tablename):
