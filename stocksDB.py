@@ -335,13 +335,8 @@ class StocksDB:
                     if line and line.startswith(b'data:'):
                         data_str = line[5:].decode('utf-8')
                         response = json.loads(data_str)
-                        ret = self.__updateStockRT(stock, response, update_date)
-                        if(ret):
-                            break
-                        else:
-                            iterate_cnt = iterate_cnt + 1
-                        if(iterate_cnt >= 5):
-                            break
+                        self.__updateStockRT(stock, response, update_date)
+                        break
 
                 self.lock.acquire()
                 StockModel = get_model('stock_'+stock['code']) 
