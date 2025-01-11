@@ -19,6 +19,7 @@ class AStockTable(Base):
     name=Column(String)
     createAt=Column(DateTime)
     updateAt=Column(DateTime)
+    state=Column(String)
 
 class StockTable(Base):
     __tablename__ = 'stock_table'
