@@ -330,12 +330,17 @@ class StocksDB:
                         update_date = time_now.date()
                 else:
                     update_date = get_previous_tradeday(time_now.date())
+                iterate_cnt = 0
                 for line in response.iter_lines():
                     if line and line.startswith(b'data:'):
                         data_str = line[5:].decode('utf-8')
                         response = json.loads(data_str)
                         ret = self.__updateStockRT(stock, response, update_date)
                         if(ret):
+                            break
+                        else:
+                            iterate_cnt = iterate_cnt + 1
+                        if(iterate_cnt >= 5):
                             break
 
                 self.lock.acquire()
