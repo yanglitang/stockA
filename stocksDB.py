@@ -16,6 +16,8 @@ from trade_calendar import get_previous_tradeday, sse_is_tradeday
 
 from GlobalInstance import get_logger,  get_config
 
+import threading
+
 def print_function_name(func):
     def wrapper(*args, **kwargs):
         get_logger().debug(f'function name: {func.__name__}')
@@ -354,7 +356,7 @@ class StocksDB:
             self.updateStockRT(stock)
             updated = updated + 1
             if(updated % 100 == 0):
-                get_logger().info(f'update stock: {stock['code']}, progress: {updated}/{len(stock_list)}')
+                get_logger().info(f'thread: {threading.current_thread().ident}, update stock: {stock['code']}, progress: {updated}/{len(stock_list)}')
 
     def updateAStock(self):
         stocks_cnt = 0
