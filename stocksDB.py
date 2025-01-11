@@ -353,7 +353,8 @@ class StocksDB:
         for stock in stock_list:
             self.updateStockRT(stock)
             updated = updated + 1
-            get_logger().info(f'update stock: {stock['code']}, progress: {updated}/{len(stock_list)}')
+            if(updated % 100 == 0):
+                get_logger().info(f'update stock: {stock['code']}, progress: {updated}/{len(stock_list)}')
 
     def updateAStock(self):
         stocks_cnt = 0
