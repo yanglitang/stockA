@@ -8,15 +8,19 @@ import copy
 import requests
 import json
 
-from data import AStockTable, StockTable, Base, get_model
+from data import AStockTable, StockTable, Base, get_model, get_hday_model
 from data import g_header, g_sina_stock_list_url, g_stockapi_rthistory_url
 
 from urllib.parse import quote_plus
 from trade_calendar import get_previous_tradeday, sse_is_tradeday
 
 from GlobalInstance import get_logger,  get_config
+from utils import extract_mcode
 
 import threading
+import gzip
+import brotli
+import brotlicffi
 
 def print_function_name(func):
     def wrapper(*args, **kwargs):
@@ -473,4 +477,163 @@ class StocksDB:
         if latest_record:
             self.updateFocusStockUpdateTime(stock, latest_record.time)
         self.lock.release()
+
+    def isPreMarketTime(self, time):
+        return time >= datetime.time(0, 0, 0) and time <= self.panQianTime
+    
+    def isAHT(self, time):
+        return time >= self.panHouTime and time <= datetime.time(23, 59, 59)
+
+    def startHDayUpdating(self, stock):
+        ret = False
+        retdatetime = datetime.datetime(1970, 1, 1, 0, 0, 0)
+        self.lock.acquire()
+        db_stocks = StocksDB.s_dbsession.query(AStockTable).filter(AStockTable.code == stock['code']).all()
+        if(len(db_stocks) > 0):
+            retdatetime = db_stocks[0].hdayUpdate
+            if(db_stocks[0].hdayState != 'ready'):
+                ret = False
+            else:
+                get_logger().debug(f'start updating hday, stock: {stock['code']}')
+                StocksDB.s_dbsession.query(AStockTable).filter(AStockTable.code == stock['code']).update({AStockTable.hdayState: 'updating'})
+                ret =  True
+
+        StockModel = get_hday_model('stock_hday_'+stock['code'])
+        inspector = inspect(self.s_dbengine)
+        if not inspector.has_table('stock_hday_'+stock['code']):
+            StockModel.__table__.create(self.s_dbengine)
+
+        StocksDB.s_dbsession.commit()
+        self.lock.release()
+        return ret, retdatetime
+    
+    def stopHDayUpdating(self, stock):
+        self.lock.acquire()
+        db_stocks = StocksDB.s_dbsession.query(AStockTable)\
+            .filter(AStockTable.code == stock['code']).all()
+        if(len(db_stocks) > 0):
+            if(db_stocks[0].hdayState == 'updating'):
+                get_logger().debug(f'stop updating hday, stock: {stock['code']}')
+                StocksDB.s_dbsession.query(AStockTable)\
+                    .filter(AStockTable.code == stock['code'])\
+                        .update({AStockTable.hdayState: 'ready'})
+        StocksDB.s_dbsession.commit()
+        self.lock.release()
+
+    def appendHDayIncrementData(self, stock, records):
+        self.lock.acquire()
+        StockModel = get_hday_model('stock_hday_' + stock['code'])
+        rows = StocksDB.s_dbsession.query(StockModel.time).order_by(StockModel.time.desc()).all()
+        db_updatetime = datetime.datetime(1970, 1, 1, 0, 0, 0)
+        if len(rows) > 0:
+            db_updatetime = rows[0]
+        for line in records:
+            parts = line.split(',')
+            record_time = datetime.datetime.strptime(parts[0], '%Y-%m-%d')
+            if(record_time > db_updatetime):
+                StocksDB.s_dbsession.add(StockModel(time=record_time, \
+                                                    kaipan = float(parts[1]), \
+                                                    shoupan = float(parts[2]), \
+                                                    zuigao = float(parts[3]), \
+                                                    zuidi = float(parts[4]), \
+                                                    volumn = float(parts[5]), \
+                                                    ammount = float(parts[6]), \
+                                                    zhenfu = float(parts[7]), \
+                                                    zhangdiefu = float(parts[8]), \
+                                                    zhangdie = float(parts[9]), \
+                                                    huanshou = float(parts[10])))
+        StocksDB.s_dbsession.commit()
+        self.lock.release()
+
+    def updateAStockHDayUpdateTime(self, stock, date):
+        self.lock.acquire()
+        updatetime = datetime.datetime(date.year, date.month, date.day, 15, 0, 0)
+        StocksDB.s_dbsession.query(AStockTable)\
+            .filter(AStockTable.code == stock['code'])\
+                .update({AStockTable.hdayUpdate: updatetime})
+        self.lock.release()
+
+    def updateStockAllHistoryHDayData(self, stock, starttime, endtime):
+        mcode = extract_mcode(stock['code'])
+        url = (f'http://push2his.eastmoney.com/api/qt/stock/kline/get?fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13'
+        f'&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61'
+        f'&beg={starttime.strftime('%Y%m%d')}&end={endtime.strftime('%Y%m%d')}&ut=fa5fd1943c7b386f172d6893dbfba10b&rtntype=6'
+        f'&secid={mcode}.{stock['code']}&klt=101&fqt=1&cb=jsonp1736601605163')
+        
+        get_logger().info(f'read stock hday from internet, code{stock['code']}, url: {url}')
+
+        updated = False
+        response = requests.get(url, headers=g_header, stream=True)
+        if(response.status_code == 200):
+            decoded_text = '\{\}'
+            if 'charset' in response.headers.get('Content-Type', ''):
+                response.encoding = response.headers['Content-Type'].split('charset=')[-1]
+            else:
+                response.encoding = 'utf-8'
+
+            if response.headers.get('content-encoding') == 'gzip':
+                # 解压 gzip 内容
+                # import io
+                # gzip_file = gzip.GzipFile(fileobj=io.BytesIO(response.content))
+                # decoded_text = gzip_file.read()
+                decoded_text = response.content.decode(response.encoding)
+            elif response.headers.get('content-encoding') == 'br':
+                responsedata = response.raw.read()
+                decoded_text = brotlicffi.decompress(responsedata).decode(response.encoding)
+            else:
+                decoded_text = response.text
+
+            if(decoded_text.find('(') != -1 \
+               and decoded_text.rfind(')') != -1 \
+                and decoded_text.rfind(')') > decoded_text.find('(')):
+                retjson = json.loads(decoded_text[decoded_text.find('(') + 1:decoded_text.rfind(')')])
+                if(retjson['data'] and retjson['data']['klines']):
+                    lines = retjson['data']['klines']
+                    get_logger().debug(f'lines count: {len(lines)}')
+                    self.appendHDayIncrementData(stock, lines)
+                    updated = True
+        if(updated):
+            timenow = datetime.datetime.now()
+            if(self.isPreMarketTime(timenow.time())\
+               or not sse_is_tradeday(timenow.date())):
+                self.updateAStockHDayUpdateTime(stock, get_previous_tradeday(timenow.date()))
+            elif(self.isAHT(timenow.time())):
+                self.updateAStockHDayUpdateTime(stock, timenow.date())
+
+    def updateHDayData(self, stock):
+        canupdate, hday_updateat = self.startHDayUpdating(stock)
+        if(not canupdate):
+            get_logger().debug(f'cannot update stock hday, stock code: {stock['code']}')
+            return
+        timenow = datetime.datetime.now()
+        while(True):
+            #盘前时间，发现更新的数据大于前一个交易日的数据，不用更新
+            if(self.isPreMarketTime(timenow.time()) \
+               and hday_updateat.date() >= get_previous_tradeday(timenow.date())):
+                break
+
+            #盘后时间，发现更新的数据已经大于当天的日期，不用更新数据
+            if(self.isAHT(timenow.time()) \
+               and hday_updateat.date() >= timenow.date()):
+                break
+
+            #交易日的交易时间段不更新数据
+            if(sse_is_tradeday(timenow.date())\
+               and not self.isPreMarketTime(timenow.time())\
+                and not self.isAHT(timenow.time())):
+                break
+            self.updateStockAllHistoryHDayData(stock, hday_updateat, datetime.datetime(2050, 1, 1, 0, 0))
+            break
+        self.stopHDayUpdating(stock)
+
+    def updateHDay(self):
+        stock_list = self.getAStocks()
+        updated = 0
+        for stock in stock_list:
+            self.updateHDayData(stock)
+            updated = updated + 1
+            if(updated % 100 == 0):
+                get_logger().info(f'thread: {threading.current_thread().ident}, update stock: {stock['code']}, progress: {updated}/{len(stock_list)}')
+
+
 
