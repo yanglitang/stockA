@@ -22,7 +22,7 @@ def print_function_name(func):
         return func(*args, **kwargs)
     return wrapper
 
-class StocksDB:f
+class StocksDB:
     s_dbsession = None
     s_dbengine = None
     def __init__(self):
